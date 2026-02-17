@@ -71,9 +71,9 @@ public class WAFFilter extends HttpFilter {
       return true;
     }
 
-    // Check if reverse DNS is on allow list
-    if (wafService.isReverseDNSAllowed(req)) {
-      LOGGER.debug("{} Reverse DNS is on allow list. Allowing request to proceed.", ipInfo);
+    // Check if request is from a known bot verified via reverse DNS
+    if (wafService.isKnownBotAllowedByReverseDNS(req)) {
+      LOGGER.debug("{} Known bot verified via reverse DNS. Allowing request to proceed.", ipInfo);
       return true;
     }
 

@@ -6,6 +6,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
@@ -23,7 +24,8 @@ public class WAFAllowListChecker {
 
   private static final String CONFIG_ALLOWED_IPS = "MCR.WAF.AllowedIPs";
   private static final String CONFIG_ALLOWED_PATHS = "MCR.WAF.AllowedPaths";
-  private static final String CONFIG_ALLOWED_REVERSE_DNS = "MCR.WAF.AllowedReverseDNS";
+  private static final String CONFIG_KNOWN_BOT_REVERSE_DNS = "MCR.WAF.KnownBotReverseDNS";
+  private static final String CONFIG_KNOWN_BOT_USER_AGENTS = "MCR.WAF.KnownBotUserAgents";
   private static final String CONFIG_VERIFY_REVERSE_DNS = "MCR.WAF.VerifyReverseDNS";
   private static final String CONFIG_DNS_CACHE_CAPACITY = "MCR.WAF.DNSCacheCapacity";
   private static final String CONFIG_DNS_CACHE_TTL_MINUTES = "MCR.WAF.DNSCacheTTLMinutes";
@@ -33,7 +35,8 @@ public class WAFAllowListChecker {
 
   private final List<IPRange> allowedIPRanges;
   private final List<Pattern> allowedPathPatterns;
-  private final List<Pattern> allowedReverseDNSPatterns;
+  private final List<Pattern> knownBotReverseDNSPatterns;
+  private final List<String> knownBotUserAgents;
   private final boolean verifyReverseDNS;
 
   // Cache for reverse DNS lookups (IP -> Hostname), bounded with TTL via MCRCache
@@ -42,7 +45,8 @@ public class WAFAllowListChecker {
   public WAFAllowListChecker() {
     this.allowedIPRanges = loadAllowedIPs();
     this.allowedPathPatterns = loadAllowedPaths();
-    this.allowedReverseDNSPatterns = loadAllowedReverseDNS();
+    this.knownBotReverseDNSPatterns = loadKnownBotReverseDNS();
+    this.knownBotUserAgents = loadKnownBotUserAgents();
     this.verifyReverseDNS = MCRConfiguration2.getBoolean(CONFIG_VERIFY_REVERSE_DNS).orElse(true);
     int capacity = MCRConfiguration2.getInt(CONFIG_DNS_CACHE_CAPACITY).orElse(DEFAULT_DNS_CACHE_CAPACITY);
     this.reverseDNSCache = new MCRCache<>(capacity, "WAF Reverse DNS");
@@ -92,9 +96,9 @@ public class WAFAllowListChecker {
     return patterns;
   }
 
-  private List<Pattern> loadAllowedReverseDNS() {
+  private List<Pattern> loadKnownBotReverseDNS() {
     List<Pattern> patterns = new ArrayList<>();
-    Optional<String> config = MCRConfiguration2.getString(CONFIG_ALLOWED_REVERSE_DNS);
+    Optional<String> config = MCRConfiguration2.getString(CONFIG_KNOWN_BOT_REVERSE_DNS);
 
     if (config.isPresent() && !config.get().isEmpty()) {
       String[] hostPatterns = config.get().split(",");
@@ -107,15 +111,33 @@ public class WAFAllowListChecker {
                 .replace(".", "\\.")
                 .replace("*", ".*");
             patterns.add(Pattern.compile(regex));
-            LOGGER.info("Added reverse DNS pattern to allow list: {} (regex: {})", hostPattern, regex);
+            LOGGER.info("Added known bot reverse DNS pattern: {} (regex: {})", hostPattern, regex);
           } catch (Exception e) {
-            LOGGER.error("Invalid reverse DNS pattern in configuration: {}", hostPattern, e);
+            LOGGER.error("Invalid known bot reverse DNS pattern in configuration: {}", hostPattern, e);
           }
         }
       }
     }
 
     return patterns;
+  }
+
+  private List<String> loadKnownBotUserAgents() {
+    List<String> userAgents = new ArrayList<>();
+    Optional<String> config = MCRConfiguration2.getString(CONFIG_KNOWN_BOT_USER_AGENTS);
+
+    if (config.isPresent() && !config.get().isEmpty()) {
+      String[] patterns = config.get().split(",");
+      for (String pattern : patterns) {
+        pattern = pattern.trim();
+        if (!pattern.isEmpty()) {
+          userAgents.add(pattern.toLowerCase(Locale.ROOT));
+          LOGGER.info("Added known bot user agent pattern: {}", pattern);
+        }
+      }
+    }
+
+    return userAgents;
   }
 
   /**
@@ -168,13 +190,21 @@ public class WAFAllowListChecker {
   }
 
   /**
-   * Checks if the request IP has a reverse DNS that matches the allow list.
+   * Checks if the request comes from a known bot (based on User-Agent) whose reverse DNS
+   * hostname matches the configured known bot DNS patterns.
+   * The reverse DNS check is only performed if the User-Agent identifies the request
+   * as coming from a known bot (e.g., Googlebot, bingbot, Baiduspider, Applebot).
    *
    * @param request the HTTP request
-   * @return true if the reverse DNS is allowed, false otherwise
+   * @return true if the User-Agent matches a known bot and the reverse DNS is verified, false otherwise
    */
-  public boolean isReverseDNSAllowed(HttpServletRequest request) {
-    if (allowedReverseDNSPatterns.isEmpty()) {
+  public boolean isKnownBotAllowedByReverseDNS(HttpServletRequest request) {
+    if (knownBotReverseDNSPatterns.isEmpty() || knownBotUserAgents.isEmpty()) {
+      return false;
+    }
+
+    // Only perform the expensive DNS check if the User-Agent identifies a known bot
+    if (!isKnownBotUserAgent(request)) {
       return false;
     }
 
@@ -185,7 +215,7 @@ public class WAFAllowListChecker {
     // Check cache: entry is valid if it was inserted within the TTL window
     String cachedHostname = reverseDNSCache.getIfUpToDate(remoteIP, System.currentTimeMillis() - ttlMs);
     if (cachedHostname != null) {
-      return matchesReverseDNSPattern(cachedHostname, remoteIP);
+      return matchesKnownBotReverseDNSPattern(cachedHostname, remoteIP);
     }
 
     // Perform reverse DNS lookup
@@ -204,7 +234,22 @@ public class WAFAllowListChecker {
     // Cache the verified result
     reverseDNSCache.put(remoteIP, hostname);
 
-    return matchesReverseDNSPattern(hostname, remoteIP);
+    return matchesKnownBotReverseDNSPattern(hostname, remoteIP);
+  }
+
+  private boolean isKnownBotUserAgent(HttpServletRequest request) {
+    String userAgent = request.getHeader("User-Agent");
+    if (userAgent == null || userAgent.isEmpty()) {
+      return false;
+    }
+    String userAgentLower = userAgent.toLowerCase(Locale.ROOT);
+    for (String pattern : knownBotUserAgents) {
+      if (userAgentLower.contains(pattern)) {
+        LOGGER.debug("User-Agent '{}' matches known bot pattern '{}'", userAgent, pattern);
+        return true;
+      }
+    }
+    return false;
   }
 
   private String performReverseDNSLookup(String ip) {
@@ -246,10 +291,10 @@ public class WAFAllowListChecker {
     }
   }
 
-  private boolean matchesReverseDNSPattern(String hostname, String ip) {
-    for (Pattern pattern : allowedReverseDNSPatterns) {
+  private boolean matchesKnownBotReverseDNSPattern(String hostname, String ip) {
+    for (Pattern pattern : knownBotReverseDNSPatterns) {
       if (pattern.matcher(hostname).matches()) {
-        LOGGER.debug("Reverse DNS {} (IP: {}) matches allow list pattern: {}", hostname, ip, pattern);
+        LOGGER.debug("Reverse DNS {} (IP: {}) matches known bot DNS pattern: {}", hostname, ip, pattern);
         return true;
       }
     }
@@ -263,6 +308,6 @@ public class WAFAllowListChecker {
    * @return true if IP, path, or reverse DNS is allowed, false otherwise
    */
   public boolean isAllowed(HttpServletRequest request) {
-    return isIPAllowed(request) || isPathAllowed(request) || isReverseDNSAllowed(request);
+    return isIPAllowed(request) || isPathAllowed(request) || isKnownBotAllowedByReverseDNS(request);
   }
 }

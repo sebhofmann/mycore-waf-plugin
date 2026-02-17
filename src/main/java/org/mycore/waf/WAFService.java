@@ -95,10 +95,15 @@ public interface WAFService {
   boolean isPathAllowed(HttpServletRequest request);
 
   /**
-   * Checks if the request IP has a reverse DNS that matches the allow list.
+   * Checks if the request comes from a known bot (identified by User-Agent) whose
+   * reverse DNS hostname matches the configured known bot DNS patterns.
+   * The reverse DNS lookup is only performed if the User-Agent first matches a known
+   * bot pattern (MCR.WAF.KnownBotUserAgents). If matched, the hostname is verified
+   * against MCR.WAF.KnownBotReverseDNS using reverse + forward DNS lookup.
+   *
    * @param request the incoming HTTP request.
-   * @return true if the reverse DNS is allowed, false otherwise.
+   * @return true if the User-Agent matches a known bot and reverse DNS is verified, false otherwise.
    */
-  boolean isReverseDNSAllowed(HttpServletRequest request);
+  boolean isKnownBotAllowedByReverseDNS(HttpServletRequest request);
 
 }
