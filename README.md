@@ -1,13 +1,13 @@
 # MyCoRe WAF Plugin
 
-A Web Application Firewall (WAF) plugin for [MyCoRe](https://www.mycore.de/) applications. It protects against bot attacks by issuing a **Proof of Work (PoW)** challenge that must be solved in the browser before any request is served. Legitimate search engine crawlers are let through via an allow list based on IP ranges, paths, or verified reverse DNS lookups.
+A Web Application Firewall (WAF) plugin for [MyCoRe](https://www.mycore.de/) applications. It protects against bot attacks by issuing a **Proof of Work (PoW)** challenge that must be solved in the browser before any request is served. Legitimate search engine crawlers are let through via an allow list based on IP ranges, paths, or verified reverse DNS lookups (only triggered when the User-Agent identifies a known bot).
 
 ## How it works
 
 1. An incoming request hits the `WAFFilter`, which is automatically registered for all URLs (`/*`) on startup.
-2. The filter checks allow lists in order: IP range → path → reverse DNS. Matching requests pass through immediately.
-3. If no allow list matches, the filter checks for a valid `WAF-PASSED` cookie (a signed, IP-bound JWT).
-4. If the cookie is missing or invalid, the client is redirected to the PoW challenge page.
+2. The filter checks allow lists in order: path → IP range → valid `WAF-PASSED` cookie → known bot reverse DNS. Matching requests pass through immediately.
+3. For the reverse DNS check, the User-Agent is inspected first. Only if it matches a known bot pattern (e.g. `Googlebot`, `bingbot`) is the expensive DNS lookup performed and the resolved hostname verified.
+4. If no allow list matches, the client is redirected to the PoW challenge page.
 5. The browser solves the SHA-256 PoW challenge in JavaScript and submits the solution.
 6. The server validates the solution and, if correct, sets the `WAF-PASSED` cookie. The client is then redirected to the originally requested URL.
 7. After too many failed attempts the client is shown a failure page.
@@ -15,26 +15,20 @@ A Web Application Firewall (WAF) plugin for [MyCoRe](https://www.mycore.de/) app
 ```
 Request
   │
-  ├─ IP allow list match?         ──yes──> pass through
-  ├─ Path allow list match?       ──yes──> pass through
-  ├─ Reverse DNS allow list match?──yes──> pass through
-  ├─ Valid WAF-PASSED cookie?     ──yes──> pass through
-  ├─ Challenge solution submitted?──yes──> validate → set cookie → redirect to original URL
-  ├─ Challenge page requested?    ──yes──> serve PoW challenge page
-  └─ (anything else)              ──────> redirect to challenge page
+  ├─ Path allow list match?              ──yes──> pass through
+  ├─ IP allow list match?                ──yes──> pass through
+  ├─ Valid WAF-PASSED cookie?            ──yes──> pass through
+  ├─ Known bot UA + reverse DNS match?   ──yes──> pass through
+  ├─ Challenge solution submitted?       ──yes──> validate → set cookie → redirect to original URL
+  ├─ Challenge page requested?           ──yes──> serve PoW challenge page
+  └─ (anything else)                     ──────> redirect to challenge page
 ```
 
 ## Installation
 
-Add the JAR to your MyCoRe application. The plugin registers itself automatically via `MCR.Startup.Class` — no additional `web.xml` changes required.
+Add the JAR to the lib directory of your MyCoRe application. 
+The plugin registers itself automatically via `MCR.Startup.Class` — no additional `web.xml` changes required.
 
-```xml
-<dependency>
-    <groupId>org.mycore</groupId>
-    <artifactId>mcr-waf-plugin</artifactId>
-    <version>2022.06</version>
-</dependency>
-```
 
 ## Configuration
 
@@ -50,12 +44,13 @@ All settings are optional. The plugin works out of the box with sensible default
 
 Requests matching any allow list entry bypass the PoW challenge completely.
 
-| Property                    | Default                                             | Description                                                                                                              |
-|-----------------------------|-----------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| `MCR.WAF.AllowedIPs`        | _(none)_                                            | Comma-separated list of IPs or CIDR ranges, e.g. `127.0.0.1,192.168.1.0/24`.                                             |
-| `MCR.WAF.AllowedPaths`      | `/robots.txt,/sitemap.xml,/favicon.ico,/api/.*,...` | Comma-separated list of Java regex patterns matched against the request path (without context path).                     |
-| `MCR.WAF.AllowedReverseDNS` | Google, Bing, Baidu, Apple crawlers                 | Comma-separated hostname patterns with `*` wildcards, e.g. `*.googlebot.com`. Verified by forward DNS lookup by default. |
-| `MCR.WAF.VerifyReverseDNS`  | `true`                                              | When `true`, a successful reverse DNS match is additionally confirmed by a forward DNS lookup (prevents DNS spoofing).   |
+| Property                        | Default                                             | Description                                                                                                              |
+|---------------------------------|-----------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `MCR.WAF.AllowedIPs`            | _(none)_                                            | Comma-separated list of IPs or CIDR ranges, e.g. `127.0.0.1,192.168.1.0/24`.                                            |
+| `MCR.WAF.AllowedPaths`          | `/robots.txt,/sitemap.xml,/favicon.ico,/api/.*,...` | Comma-separated list of Java regex patterns matched against the request path (without context path).                     |
+| `MCR.WAF.KnownBotUserAgents`    | Google, Bing, Baidu, Apple bot UA strings           | Comma-separated User-Agent substrings (case-insensitive). Only requests whose UA matches one of these strings trigger a reverse DNS lookup. |
+| `MCR.WAF.KnownBotReverseDNS`    | Google, Bing, Baidu, Apple crawler hostnames        | Comma-separated hostname patterns with `*` wildcards, e.g. `*.googlebot.com`. Only checked when the UA already matched a known bot pattern. Verified by forward DNS lookup by default. |
+| `MCR.WAF.VerifyReverseDNS`      | `true`                                              | When `true`, a successful reverse DNS match is additionally confirmed by a forward DNS lookup (prevents DNS spoofing).   |
 
 #### Extending the default path allow list
 
@@ -63,6 +58,15 @@ Use MyCoRe's property inheritance to extend the defaults without losing them:
 
 ```properties
 MCR.WAF.AllowedPaths=%MCR.WAF.AllowedPaths%,/my-public-api/.*
+```
+
+#### Extending the known bot lists
+
+The same inheritance pattern works for the bot properties:
+
+```properties
+MCR.WAF.KnownBotUserAgents=%MCR.WAF.KnownBotUserAgents%,MyCustomBot
+MCR.WAF.KnownBotReverseDNS=%MCR.WAF.KnownBotReverseDNS%,*.mycustombot.example.com
 ```
 
 ### Reverse DNS Cache
@@ -100,7 +104,7 @@ Templates use `{{key}}` placeholders. Keys are resolved first from explicitly pa
 - **WAF-PASSED cookie:** The cookie is `HttpOnly`, `SameSite=Strict`, and `Secure` (when the application is served over HTTPS). It is a signed JWT bound to the client's IP address, so it cannot be reused from a different IP.
 - **Challenge tokens:** Signed JWTs with a short expiry (default 2 minutes). They include the client IP, so a token captured by a third party cannot be used to pass the challenge.
 - **Proof of Work:** The nonce submitted by the client is validated server-side using SHA-256. The difficulty is embedded in the signed token and cannot be tampered with by the client.
-- **Reverse DNS spoofing:** When `MCR.WAF.VerifyReverseDNS=true` (the default), the plugin performs a forward DNS lookup to confirm that the resolved hostname actually points back to the original IP, preventing DNS spoofing attacks.
+- **Reverse DNS spoofing:** When `MCR.WAF.VerifyReverseDNS=true` (the default), the plugin performs a forward DNS lookup to confirm that the resolved hostname actually points back to the original IP, preventing DNS spoofing attacks. Additionally, the DNS lookup is only triggered when the User-Agent already identifies the request as a known bot — arbitrary requests never incur a DNS lookup.
 - **Bot detection:** In addition to the PoW check, the plugin inspects the browser fingerprint submitted with the solution (User-Agent, WebDriver flag, screen resolution, language list, etc.) to reject obvious bots even if they manage to solve the hash challenge.
 
 ## License
