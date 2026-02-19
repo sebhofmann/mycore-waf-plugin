@@ -133,7 +133,7 @@ public class DefaultWAFService implements WAFService {
         + "; Path=/"
         + "; Max-Age=" + (passedTokenExpiryMinutes * 60)
         + "; HttpOnly"
-        + "; SameSite=Strict"
+        + "; SameSite=Lax"
         + (secure ? "; Secure" : "");
     response.addHeader("Set-Cookie", cookieHeader);
   }
