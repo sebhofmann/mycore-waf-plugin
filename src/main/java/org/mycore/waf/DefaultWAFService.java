@@ -234,7 +234,7 @@ public class DefaultWAFService implements WAFService {
         Map.of("pow_challenge_token", generateChallengeToken(request)));
 
     try {
-      resp.setContentType("text/html");
+      resp.setContentType("text/html;charset=UTF-8");
       resp.getWriter().write(html);
     } catch (IOException e) {
       throw new RuntimeException(e);
@@ -255,7 +255,7 @@ public class DefaultWAFService implements WAFService {
 
   private void showFailurePage(HttpServletRequest request, HttpServletResponse resp) {
     try {
-      resp.setContentType("text/html");
+      resp.setContentType("text/html;charset=UTF-8");
       resp.getWriter().write(templateService.renderFailPage(request.getLocale()));
     } catch (IOException e) {
       throw new RuntimeException(e);
