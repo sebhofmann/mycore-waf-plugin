@@ -63,17 +63,6 @@
       <url>https://oss.sonatype.org/content/repositories/snapshots</url>
     </pluginRepository>
   </pluginRepositories>
-  <dependencyManagement>
-    <dependencies>
-      <dependency>
-        <groupId>org.mycore</groupId>
-        <artifactId>mycore-bom</artifactId>
-        <version>2024.06.2</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-    </dependencies>
-  </dependencyManagement>
 
   <dependencies>
     <dependency>
@@ -107,6 +96,16 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
-
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.mycore</groupId>
+        <artifactId>mycore-bom</artifactId>
+        <version>2024.06.2</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
 </project>
