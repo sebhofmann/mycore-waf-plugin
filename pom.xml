@@ -14,9 +14,6 @@
 
   <name>mcr-waf-plugin</name>
   <description>A small plugin to prevent bad Bots from turning the application down</description>
-  <properties>
-    <java.target.version>17</java.target.version>
-  </properties>
   <build>
     <plugins>
       <plugin>
