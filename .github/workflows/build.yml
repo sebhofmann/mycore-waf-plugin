@@ -3,10 +3,10 @@ name: Build
 on:
   push:
     branches:
-      - 2022.06.x
+      - 2023.06.x
   pull_request:
     branches:
-      - 2022.06.x
+      - 2023.06.x
 
 jobs:
   build:
