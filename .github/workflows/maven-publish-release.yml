@@ -1,0 +1,27 @@
+name: Maven "Snapshot" Release
+on:
+  release:
+    types: [created]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          server-id: 'central'
+          server-username: SONATYPE_USERNAME
+          server-password: SONATYPE_TOKEN
+      - name: Change Versions
+        run: mvn versions:set -DnewVersion=${{ github.ref_name }}-SNAPSHOT
+      - name: Publish to sonatype-central with Apache Maven
+        run: mvn --batch-mode deploy
+        env:
+          SONATYPE_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          SONATYPE_TOKEN: ${{ secrets.OSSRH_TOKEN }}
