@@ -5,15 +5,18 @@
   <parent>
     <groupId>org.mycore</groupId>
     <artifactId>mycore-parent</artifactId>
-    <version>58</version>
+    <version>59-SNAPSHOT</version>
   </parent>
   <groupId>org.mycore</groupId>
   <artifactId>mcr-waf-plugin</artifactId>
-  <version>2025.12-SNAPSHOT</version>
+  <version>2026.06-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>mcr-waf-plugin</name>
   <description>A small plugin to prevent bad Bots from turning the application down</description>
+  <properties>
+    <java.target.version>25</java.target.version>
+  </properties>
   <build>
     <plugins>
       <plugin>
@@ -101,7 +104,7 @@
       <dependency>
         <groupId>org.mycore</groupId>
         <artifactId>mycore-bom</artifactId>
-        <version>2025.12.1</version>
+        <version>2026.06.0-SNAPSHOT</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
