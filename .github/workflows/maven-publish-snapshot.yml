@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - 'master'
+      - '*.x'
   workflow_dispatch:
 jobs:
   build:
@@ -12,10 +13,18 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Set up JDK 17
+      - name: Determine Java version
+        id: java-version
+        run: |
+          if [[ "${{ github.ref_name }}" == "master" ]]; then
+            echo "version=25" >> $GITHUB_OUTPUT
+          else
+            echo "version=21" >> $GITHUB_OUTPUT
+          fi
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: ${{ steps.java-version.outputs.version }}
           distribution: 'temurin'
           server-id: 'central'
           server-username: SONATYPE_USERNAME
