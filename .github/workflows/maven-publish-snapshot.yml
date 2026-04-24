@@ -1,4 +1,4 @@
-name: Maven Snapshot deploy
+name: Maven Snapshot build
 on:
   push:
     branches:
@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 17
@@ -17,11 +16,6 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          server-id: 'central'
-          server-username: SONATYPE_USERNAME
-          server-password: SONATYPE_TOKEN
-      - name: Publish SNAPSHOT to sonatype-central with Apache Maven
-        env:
-          SONATYPE_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          SONATYPE_TOKEN: ${{ secrets.OSSRH_TOKEN }}
-        run: mvn --batch-mode deploy
+          cache: maven
+      - name: Build SNAPSHOT with Apache Maven
+        run: mvn --batch-mode verify
