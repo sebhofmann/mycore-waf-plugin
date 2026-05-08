@@ -9,18 +9,16 @@ jobs:
   forward-merge:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine target branch
         id: target
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE: ${{ github.ref_name }}
         run: |
           ALL_VERSIONS=$(git branch -r \
@@ -43,36 +41,28 @@ jobs:
           echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
 
-      - name: Create or update merge PR
+      - name: Create PR if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE: ${{ steps.target.outputs.source }}
           TARGET: ${{ steps.target.outputs.target }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          BRANCH="auto-merge/${SOURCE}-to-${TARGET}"
-
-          git fetch origin "$SOURCE" "$TARGET"
-          git checkout -B "$BRANCH" "origin/$TARGET"
-
-          if git merge "origin/$SOURCE" --no-ff -m "Forward-merge ${SOURCE} into ${TARGET}"; then
-            CONFLICT_LABEL=""
-            TITLE="Forward-merge ${SOURCE} -> ${TARGET}"
-          else
-            git merge --abort
-            git merge "origin/$SOURCE" --no-ff --strategy-option=ours \
-              -m "Forward-merge ${SOURCE} into ${TARGET} (conflicts)"
-            CONFLICT_LABEL="has-conflicts"
-            TITLE="[CONFLICTS] Forward-merge ${SOURCE} -> ${TARGET}"
+          EXISTING=$(gh pr list --base "$TARGET" --head "$SOURCE" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING bereits offen, skip."
+            exit 0
           fi
 
-          git push -f origin "$BRANCH"
+          gh pr create --base "$TARGET" --head "$SOURCE" \
+            --title "Forward-merge ${SOURCE} -> ${TARGET}" \
+            --body "Automatischer Forward-Merge-PR von \`${SOURCE}\` nach \`${TARGET}\`.
 
-          if ! gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
-            gh pr create --base "$TARGET" --head "$BRANCH" \
-              --title "$TITLE" \
-              --body "Automatischer Forward-Merge-PR von \`${SOURCE}\` nach \`${TARGET}\`. Bitte reviewen und manuell mergen." \
-              ${CONFLICT_LABEL:+--label "$CONFLICT_LABEL"}
-          fi
+          Konflikte lokal lösen:
+          \`\`\`
+          git checkout ${TARGET}
+          git pull
+          git merge --no-commit --no-ff origin/${SOURCE}
+          # Konflikte fixen
+          git commit
+          git push
+          \`\`\`"
