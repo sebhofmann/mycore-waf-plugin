@@ -41,28 +41,54 @@ jobs:
           echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
 
-      - name: Create PR if missing
+      - name: Build PR body
+        id: body
+        env:
+          SOURCE: ${{ steps.target.outputs.source }}
+          TARGET: ${{ steps.target.outputs.target }}
+        run: |
+          git fetch --quiet origin "$SOURCE" "$TARGET"
+
+          COMMITS=$(git log --pretty=format:'* %h %s' "origin/${TARGET}..origin/${SOURCE}")
+          if [ -z "$COMMITS" ]; then
+            COMMITS="_(keine neuen Commits)_"
+          fi
+
+          {
+            echo 'body<<__PR_BODY_EOF__'
+            echo "Merge branch \`${SOURCE}\` into \`${TARGET}\`"
+            echo
+            echo "## Commits"
+            echo
+            echo "$COMMITS"
+            echo
+            echo "---"
+            echo "Konflikte lokal lösen:"
+            echo '```'
+            echo "git checkout ${TARGET}"
+            echo "git pull"
+            echo "git merge --no-commit --no-ff origin/${SOURCE}"
+            echo "# Konflikte fixen, dann:"
+            echo "git commit"
+            echo "git push"
+            echo '```'
+            echo '__PR_BODY_EOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE: ${{ steps.target.outputs.source }}
           TARGET: ${{ steps.target.outputs.target }}
+          PR_TITLE: "Merge branch '${{ steps.target.outputs.source }}' into ${{ steps.target.outputs.target }}"
+          PR_BODY: ${{ steps.body.outputs.body }}
         run: |
           EXISTING=$(gh pr list --base "$TARGET" --head "$SOURCE" --state open --json number --jq '.[0].number')
           if [ -n "$EXISTING" ]; then
-            echo "PR #$EXISTING bereits offen, skip."
-            exit 0
+            echo "PR #$EXISTING bereits offen, aktualisiere Body."
+            gh pr edit "$EXISTING" --title "$PR_TITLE" --body "$PR_BODY"
+          else
+            gh pr create --base "$TARGET" --head "$SOURCE" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
           fi
-
-          gh pr create --base "$TARGET" --head "$SOURCE" \
-            --title "Forward-merge ${SOURCE} -> ${TARGET}" \
-            --body "Automatischer Forward-Merge-PR von \`${SOURCE}\` nach \`${TARGET}\`.
-
-          Konflikte lokal lösen:
-          \`\`\`
-          git checkout ${TARGET}
-          git pull
-          git merge --no-commit --no-ff origin/${SOURCE}
-          # Konflikte fixen
-          git commit
-          git push
-          \`\`\`"
